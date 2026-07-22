@@ -5,6 +5,7 @@ const { register, login, getMe, adminOnlyTest, refreshAccessToken, logout,regist
 const authGuard = require('../middleware/authGuard');
 const roleGuard = require('../middleware/roleGuard');
 const validate = require('../middleware/validate');
+const { authLimiter } = require('../middleware/rateLimiter');
 
 const registerRules = [
   body('name').trim().notEmpty().withMessage('Name is required'),
@@ -18,8 +19,8 @@ const loginRules = [
   body('password').notEmpty().withMessage('Password is required')
 ];
 
-router.post('/register', registerRules, validate, register);
-router.post('/login', loginRules, validate, login);
+router.post('/register',authLimiter, registerRules, validate, register);
+router.post('/login',authLimiter, loginRules, validate, login);
 router.post('/refresh', refreshAccessToken);
 router.post('/logout', logout);
 router.get('/me', authGuard, getMe);

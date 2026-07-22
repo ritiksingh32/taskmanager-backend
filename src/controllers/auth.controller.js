@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../utils/prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
+const logger = require('../utils/logger');
 
 // REGISTER
 const register = async (req, res) => {
@@ -50,39 +51,38 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. Find the user
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
+      logger.warn('Failed login attempt - user not found', { email });
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // 2. Compare the provided password with the hashed password in DB
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
+      logger.warn('Failed login attempt - wrong password', { email });
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // 3. Generate JWT access token (short-lived)
     const accessToken = jwt.sign(
       { userId: user.id, role: user.role, orgId: user.orgId },
       process.env.JWT_ACCESS_SECRET,
       { expiresIn: '15m' }
     );
 
-    // 4. Generate JWT refresh token (long-lived)
     const refreshToken = jwt.sign(
       { userId: user.id },
       process.env.JWT_REFRESH_SECRET,
       { expiresIn: '7d' }
     );
 
-    // 5. Send refresh token as httpOnly cookie (safer than storing in localStorage)
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: false, // set to true in production (requires HTTPS)
+      secure: false,
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
+
+    logger.info('User logged in', { userId: user.id, email: user.email });
 
     res.status(200).json({
       message: 'Login successful',
@@ -91,7 +91,7 @@ const login = async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
+    logger.error('Login error', { error: error.message, stack: error.stack });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
