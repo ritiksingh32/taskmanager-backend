@@ -34,6 +34,9 @@ const createTask = asyncHandler(async (req, res) => {
 const getTasksByProject = asyncHandler(async (req, res) => {
   const { projectId } = req.query;
   const { orgId } = req.user;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 20;
+  const skip = (page - 1) * limit;
 
   const project = await prisma.project.findFirst({
     where: { id: projectId, orgId }
@@ -42,11 +45,25 @@ const getTasksByProject = asyncHandler(async (req, res) => {
     throw new AppError('Project not found', 404);
   }
 
-  const tasks = await prisma.task.findMany({
-    where: { projectId }
-  });
+  const [tasks, totalCount] = await Promise.all([
+    prisma.task.findMany({
+      where: { projectId },
+      skip,
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.task.count({ where: { projectId } }),
+  ]);
 
-  res.json({ tasks });
+  res.json({
+    tasks,
+    pagination: {
+      currentPage: page,
+      totalPages: Math.ceil(totalCount / limit),
+      totalCount,
+      limit,
+    },
+  });
 });
 
 // UPDATE task status

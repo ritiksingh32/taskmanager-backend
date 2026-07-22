@@ -19,19 +19,32 @@ const createProject = async (req, res) => {
 };
 
 // GET all projects — ONLY for this user's organization (multi-tenancy enforcement)
-const getProjects = async (req, res) => {
-  try {
-    const { orgId } = req.user;
+const getProjects = asyncHandler(async (req, res) => {
+  const { orgId } = req.user;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
 
-    const projects = await prisma.project.findMany({
-      where: { orgId } // critical line — this is what prevents cross-tenant data leaks
-    });
+  const [projects, totalCount] = await Promise.all([
+    prisma.project.findMany({
+      where: { orgId },
+      skip,
+      take: limit,
+      orderBy: { id: 'desc' }, // consistent ordering — important for pagination correctness
+    }),
+    prisma.project.count({ where: { orgId } }),
+  ]);
 
-    res.json({ projects });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-};
+  res.json({
+    projects,
+    pagination: {
+      currentPage: page,
+      totalPages: Math.ceil(totalCount / limit),
+      totalCount,
+      limit,
+    },
+  });
+});
 
 const getProjectById = asyncHandler(async (req, res) => {
   const { id } = req.params;
