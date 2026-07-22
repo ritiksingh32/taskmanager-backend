@@ -1,22 +1,22 @@
 const prisma = require('../utils/prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
+const redis = require('../utils/redisClient');
 
 // CREATE a project — scoped to the logged-in user's organization
-const createProject = async (req, res) => {
-  try {
-    const { name } = req.body;
-    const { orgId } = req.user; // from the JWT payload, via authGuard
+const createProject = asyncHandler(async (req, res) => {
+  const { name } = req.body;
+  const { orgId } = req.user;
 
-    const project = await prisma.project.create({
-      data: { name, orgId }
-    });
+  const project = await prisma.project.create({ data: { name, orgId } });
 
-    res.status(201).json({ message: 'Project created', project });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+  const keys = await redis.keys(`projects:${orgId}:*`);
+  if (keys.length > 0) {
+    await redis.del(...keys);
   }
-};
+
+  res.status(201).json({ message: 'Project created', project });
+});
 
 // GET all projects — ONLY for this user's organization (multi-tenancy enforcement)
 const getProjects = asyncHandler(async (req, res) => {
@@ -25,17 +25,26 @@ const getProjects = asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 10;
   const skip = (page - 1) * limit;
 
+  const cacheKey = `projects:${orgId}:page:${page}:limit:${limit}`;
+
+  // 1. Try cache first
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    return res.json({ ...cached, source: 'cache' });
+  }
+
+  // 2. Cache miss — fetch from Postgres
   const [projects, totalCount] = await Promise.all([
     prisma.project.findMany({
       where: { orgId },
       skip,
       take: limit,
-      orderBy: { id: 'desc' }, // consistent ordering — important for pagination correctness
+      orderBy: { id: 'desc' },
     }),
     prisma.project.count({ where: { orgId } }),
   ]);
 
-  res.json({
+  const responseData = {
     projects,
     pagination: {
       currentPage: page,
@@ -43,7 +52,12 @@ const getProjects = asyncHandler(async (req, res) => {
       totalCount,
       limit,
     },
-  });
+  };
+
+  // 3. Store in cache for next time, expire after 60 seconds
+  await redis.set(cacheKey, responseData, { ex: 60 });
+
+  res.json({ ...responseData, source: 'database' });
 });
 
 const getProjectById = asyncHandler(async (req, res) => {

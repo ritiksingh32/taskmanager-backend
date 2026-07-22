@@ -3,6 +3,14 @@ const ActivityLog = require('../models/ActivityLog.model');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 
+
+async function invalidateTaskCache(projectId) {
+  const keys = await redis.keys(`tasks:${projectId}:*`);
+  if (keys.length > 0) {
+    await redis.del(...keys);
+  }
+}
+
 // CREATE a task
 const createTask = asyncHandler(async (req, res) => {
   const { title, projectId } = req.body;
@@ -27,6 +35,8 @@ const createTask = asyncHandler(async (req, res) => {
     details: { title }
   });
 
+   await invalidateTaskCache(projectId); 
+
   res.status(201).json({ message: 'Task created', task });
 });
 
@@ -45,6 +55,13 @@ const getTasksByProject = asyncHandler(async (req, res) => {
     throw new AppError('Project not found', 404);
   }
 
+  const cacheKey = `tasks:${projectId}:page:${page}:limit:${limit}`;
+
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    return res.json({ ...cached, source: 'cache' });
+  }
+
   const [tasks, totalCount] = await Promise.all([
     prisma.task.findMany({
       where: { projectId },
@@ -55,7 +72,7 @@ const getTasksByProject = asyncHandler(async (req, res) => {
     prisma.task.count({ where: { projectId } }),
   ]);
 
-  res.json({
+  const responseData = {
     tasks,
     pagination: {
       currentPage: page,
@@ -63,7 +80,11 @@ const getTasksByProject = asyncHandler(async (req, res) => {
       totalCount,
       limit,
     },
-  });
+  };
+
+  await redis.set(cacheKey, responseData, { ex: 60 });
+
+  res.json({ ...responseData, source: 'database' });
 });
 
 // UPDATE task status
@@ -95,6 +116,8 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
     action: 'STATUS_CHANGED',
     details: { from: oldStatus, to: status }
   });
+
+  await invalidateTaskCache(task.projectId);
 
   const io = req.app.get('io');
   io.to(`org_${orgId}`).emit('task_updated', {
@@ -139,6 +162,7 @@ const deleteTask = asyncHandler(async (req, res) => {
   }
 
   await prisma.task.delete({ where: { id } });
+  await invalidateTaskCache(task.projectId);
 
   res.json({ message: 'Task deleted' });
 });
