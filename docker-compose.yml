@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/taskmanager
+      MONGO_URI: mongodb://mongo:27017/taskmanager
+      JWT_ACCESS_SECRET: local_dev_secret_access
+      JWT_REFRESH_SECRET: local_dev_secret_refresh
+      PORT: 5000
+    depends_on:
+      - postgres
+      - mongo
+    volumes:
+      - ./uploads:/app/uploads
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: taskmanager
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  postgres_data:
+  mongo_data:

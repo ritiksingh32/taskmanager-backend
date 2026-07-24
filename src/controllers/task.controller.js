@@ -2,6 +2,7 @@ const prisma = require('../utils/prismaClient');
 const ActivityLog = require('../models/ActivityLog.model');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
+const redis = require('../utils/redisClient');
 
 
 async function invalidateTaskCache(projectId) {
